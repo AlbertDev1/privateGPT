@@ -3,13 +3,18 @@ from dotenv import load_dotenv
 from langchain.chains import RetrievalQA
 from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
+from langchain.schema import Generation, RunInfo
 from langchain.vectorstores import Chroma
 from langchain.llms import GPT4All, LlamaCpp
+import chromadb
 from constants import CHROMA_SETTINGS
 import os
 import time
 
-load_dotenv()
+
+if not load_dotenv():
+    print("Could not load .env file or it is empty. Please check if it exists and is readable.")
+    exit(1)
 
 
 class Config:
@@ -36,7 +41,8 @@ class PrivateGPTQueryInterface:
                                 n_batch=self.config.model_n_batch,
                                 callbacks=self._get_callbacks(), verbose=False)
         elif self.config.model_type == "GPT4All":
-            self.llm = GPT4All(model=self.config.model_path, backend='gptj', n_batch=self.config.model_n_batch,
+            self.llm = GPT4All(model=self.config.model_path, max_tokens=self.config.model_n_ctx, backend='gptj',
+                               n_batch=self.config.model_n_batch,
                                callbacks=self._get_callbacks(), verbose=False)
         else:
             raise Exception(
@@ -47,8 +53,9 @@ class PrivateGPTQueryInterface:
 
     def get_answer(self, query, mute_stream=False, hide_source=False):
         embeddings = HuggingFaceEmbeddings(model_name=self.config.embeddings_model_name)
+        chroma_client = chromadb.PersistentClient(settings=CHROMA_SETTINGS, path=self.config.persist_directory)
         db = Chroma(persist_directory=self.config.persist_directory, embedding_function=embeddings,
-                    client_settings=CHROMA_SETTINGS)
+                    client_settings=CHROMA_SETTINGS, client=chroma_client)
         retriever = db.as_retriever(search_kwargs={"k": self.config.target_source_chunks})
 
         if query.strip() == "":
@@ -68,3 +75,28 @@ class PrivateGPTQueryInterface:
             "time_taken": round(end - start, 2),
             "source_documents": docs
         }
+
+    # def generate(self, msg):
+    #     model = GPT4All(
+    #         model=self.config.model_path,
+    #         max_tokens=self.config.model_n_ctx,
+    #         backend='gptj',
+    #         n_batch=self.config.model_n_batch,
+    #         callbacks=self._get_callbacks(),
+    #         verbose=False
+    #     )
+    #
+    #     # If the model's generate function supports streaming and yields results,
+    #     # then loop over the results and emit them in real-time
+    #     m = model.generate(msg, self.config.model_n_ctx, streaming=False)
+    #     for word in m:
+    #         if isinstance(word, list):  # Check if word is a list
+    #             texts = [gen.text for gen_list in word if isinstance(gen_list, list) for gen in gen_list if
+    #                      hasattr(gen, 'text')]
+    #             emit('tokens', texts)
+    #         else:
+    #             # Handle the case where 'word' isn't a list
+    #             # For example, you could log an error or emit the string directly
+    #             pass
+
+
